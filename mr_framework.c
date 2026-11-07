@@ -1,53 +1,8 @@
-#include "interface.h"
 #include <pthread.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-struct mr_chunk_t {
-  const void *kv_list;
-  size_t count;
-};
-
-static void partition(const void *pairs, size_t pair_size, size_t total_pairs, size_t total_chunks,
-                      struct mr_chunk_t *chunks) {
-  size_t pairs_per_chunk = total_pairs / total_chunks; // The top chunks hold pairs_per_chunk + 1
-  size_t top_chunks = total_pairs % total_chunks;
-  int checkpoint = 0;
-  for (size_t i = 0; i < total_chunks; i++) {
-    chunks[i].kv_list = (const char *)pairs + checkpoint * pair_size;
-    chunks[i].count = pairs_per_chunk + (i < top_chunks ? 1 : 0);
-    checkpoint += chunks[i].count;
-  }
-}
-
-struct mr_thread_map_args {
-  void (*map)(const struct mr_in_kv *);
-  struct mr_chunk_t chunk;
-};
-
-static void *thread_map(void *arg) {
-  struct mr_thread_map_args *map_args = (struct mr_thread_map_args *)arg;
-  for (size_t i = 0; i < map_args->chunk.count; i++) {
-    map_args->map(&map_args->chunk.kv_list[i]);
-  }
-
-  return NULL;
-}
-
-struct mr_thread_reduce_args {
-  void (*reduce)(const struct mr_out_kv *);
-  struct mr_chunk_t chunk;
-};
-
-static void *thread_reduce(void *arg) {
-  struct mr_thread_reduce_args *reduce_args = (struct mr_thread_reduce_args *)arg;
-  for (size_t i = 0; i < reduce_args->chunk.count; i++) {
-    reduce_args->reduce(&reduce_args->chunk.kv_list[i]);
-  }
-
-  return NULL;
-}
+#include "mr_framework_threading.h"
 
 struct mr_inter_pair {
   char key[MAX_KEY_SIZE];
@@ -111,36 +66,28 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *), 
   partition(input->kv_lst, sizeof(struct mr_in_kv), input->count, mapper_count, map_chunks);
 
   // Create a set of threads to run each chunk
-  pthread_t map_threads[mapper_count];
-  struct mr_thread_map_args map_args[mapper_count];
-  for (size_t i = 0; i < mapper_count; i++) {
-    map_args[i].map = map;
-    map_args[i].chunk = map_chunks[i];
-    pthread_create(&map_threads[i], NULL, thread_map, &map_args[i]);
-  }
-
-  for (size_t i = 0; i < mapper_count; i++) {
-    pthread_join(map_threads[i], NULL);
-  }
+  execute_chunks_in_threads(mapper_count, map_chunks);
 
   // Group intermediate outputs by keys
   qsort(mr_inter_pairs, mr_inter_count, sizeof *mr_inter_pairs, compare_pairs);
   group_by_keys();
 
+  for (size_t i = 0; i < mr_group_count; i++) {
+    printf("(%s, [", mr_groups[i].key);
+
+    for (size_t j = 0; j < mr_groups[i].count; j++) {
+      printf("%s, ", mr_groups[i].value[j]);
+
+      if (j == mr_groups[i].count - 1) {
+        printf("%s], )\n", mr_groups[i].value[j]);
+      }
+    }
+  }
+
   // Reduce
   struct mr_chunk_t reduce_chunks[reducer_count];
   partition(mr_groups, sizeof(struct mr_out_kv), mr_group_count, reducer_count, reduce_chunks);
-  pthread_t reduce_threads[reducer_count];
-  struct mr_thread_reduce_args reduce_args[reducer_count];
-  for (size_t i = 0; i < reducer_count; i++) {
-    reduce_args[i].reduce = reduce;
-    reduce_args[i].chunk = reduce_chunks[i];
-    pthread_create(&reduce_threads[i], NULL, thread_reduce, &reduce_args[i]);
-  }
-
-  for (size_t i = 0; i < reducer_count; i++) {
-    pthread_join(reduce_threads[i], NULL);
-  }
+  execute_chunks_in_threads(reducer_count, reduce_chunks);
   return 0;
 }
 
@@ -175,35 +122,5 @@ int mr_emit_i(const char *key, const char *value) {
 }
 
 static pthread_mutex_t mr_final_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct mr_final_pair *mr_final_pairs = NULL;
-static size_t mr_final_count = 0, mr_final_cap = 0;
 
-int mr_emit_f(const char *key, const char *value) {
-  pthread_mutex_lock(&mr_final_lock);
-
-  if (mr_final_count == mr_final_cap) { // Used up the current memory available
-    size_t new_cap =
-        mr_final_cap ? mr_final_cap * 2 : 64; // Double the heap size to allocate more memory
-    struct mr_final_pair *new_final = realloc(mr_final_pairs, new_cap * (sizeof *new_final));
-    if (new_final == NULL) { // realloc fails
-      pthread_mutex_unlock(&mr_final_lock);
-      return -1;
-    }
-    mr_final_pairs = new_final;
-    mr_final_cap = new_cap;
-  }
-
-  struct mr_final_pair *slot = &mr_final_pairs[mr_final_count];
-  strncpy(slot->key, key, MAX_KEY_SIZE - 1); // Safely populate the key so thtat it can be
-                                             // terminated
-  slot->key[MAX_KEY_SIZE - 1] = '\0';
-  strncpy(slot->value, value, MAX_KEY_SIZE - 1);
-  slot->value[MAX_KEY_SIZE - 1] = '\0';
-  slot->seq = mr_final_count; // arrival order
-  mr_final_count++;
-
-  pthread_mutex_unlock(&mr_final_lock);
-  return 0;
-
-  return 0;
-}
+int mr_emit_f(const char *key, const char *value) { return 0; }
