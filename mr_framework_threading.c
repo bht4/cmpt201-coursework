@@ -19,13 +19,16 @@ void *thread_run(void *arg) {
   return NULL;
 }
 
-void execute_chunks_in_threads(size_t total_threads, const struct mr_chunk_t *chunk_list) {
+void execute_chunks_in_threads(enum mr_stage stage, size_t total_threads,
+                               const struct mr_chunk_t *chunks, union mr_thread_fn thread_fn) {
   pthread_t threads[total_threads];
   struct mr_thread_args thread_args[total_threads];
+
   for (size_t i = 0; i < total_threads; i++) {
-    thread_args[i].stage = MR_MAP;
-    thread_args[i].items = chunk_list[i].kv_list;
-    thread_args[i].count = chunk_list[i].count;
+    thread_args[i].stage = stage;
+    thread_args[i].items = chunks[i].kv_list;
+    thread_args[i].count = chunks[i].count;
+    thread_args[i].thread_fn = thread_fn;
     pthread_create(&threads[i], NULL, thread_run, &thread_args[i]);
   }
 
