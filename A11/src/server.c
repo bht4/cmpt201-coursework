@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,8 +23,12 @@ struct client_info {
 struct client_info *clients; // Needed to store all active clients to send message to all later
 int client_count = 0;
 
+pthread_mutex_t client_count_lock = PTHREAD_MUTEX_INITIALIZER;
+
 void *handle_client(void *arg) {
-  int client_fd = *(int *)arg;
+  struct client_info *client = arg;
+  int client_fd = client->cfd;
+  struct sockaddr_in client_addr = client->addr;
   char buf[BUF_SIZE];
   ssize_t msg_bytes_read;
   uint8_t msg_type;
@@ -39,8 +44,6 @@ void *handle_client(void *arg) {
   if (msg_type == 0x00) {
     while ((msg_bytes_read = read(client_fd, &buf, BUF_SIZE - 1)) > 0) { // Preserve the last byte
                                                                          // for newline character
-      buf[msg_bytes_read] = '\n';
-      // Get the client's IP address and port through client_fd
       bytes_write = write(client_fd, buf, msg_bytes_read);
 
       if (bytes_write == -1) {
@@ -89,6 +92,10 @@ int main(int argc, char *argv[]) {
       handle_error("accept");
     }
 
+    pthread_mutex_lock(&client_count_lock);
+    client_count++;
+    pthread_mutex_unlock(&client_count_lock);
+
     struct client_info *client = malloc(sizeof(struct client_info));
     if (client == NULL) {
       close(client_fd);
@@ -97,7 +104,13 @@ int main(int argc, char *argv[]) {
 
     client->cfd = client_fd;
     client->addr = client_addr;
-    handle_client(&client);
+
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, handle_client, client) != 0) {
+      handle_error("pthread_create");
+    }
+
+    pthread_detach(thread);
   }
 
   if (close(server_fd) == -1) {
