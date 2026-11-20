@@ -20,11 +20,22 @@ struct client_info {
   struct sockaddr_in addr;
 };
 
-struct client_info **clients; // Needed to store all active clients to send message to all later
-int client_count = 0;         // The number of clients who are currently active in the group chat
-int terminated_count;         // The number of clients who terminated
+struct client_info **clients =
+    NULL;                 // Needed to store all active clients to send message to all later
+int client_count = 0;     // The number of clients who are currently active in the group chat
+int expected_terms;       // The expected number of terminated clients before the server terminates
+                          // itself
+int terminated_count = 0; // The number of clients who terminated
 
-pthread_mutex_t client_count_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t server_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void send_all_clients(char *msg, size_t msg_len) {
+  for (size_t i = 0; i < client_count; i++) {
+    // Send functions similarly to write. In this case, it ensures that writing to a
+    // client that already left must not kill the server
+    send(clients[i]->cfd, msg, msg_len, MSG_NOSIGNAL);
+  }
+}
 
 void *handle_client(void *arg) {
   struct client_info *client = arg;
@@ -42,7 +53,7 @@ void *handle_client(void *arg) {
 
       // Read more, hoping to get a complete string
       bytes_read = read(client->cfd, buf + current_buf_size, BUF_SIZE - current_buf_size);
-      if (bytes_read < 0) {
+      if (bytes_read <= 0) { // The client left or read failed
         break;
       }
 
@@ -61,19 +72,37 @@ void *handle_client(void *arg) {
       memcpy(response + 5, &client->addr.sin_port, sizeof(uint16_t));
       memcpy(response + 7, buf + 1, msg_len - 1);
 
-      // Send to all clients
-      for (int i = 0; i < client_count; i++) {
-        if (write(clients[i]->cfd, response, response_len) == -1) {
-          break;
-        }
+      // Send to all clients. Use lock here to ensure that all clients see identical arrival order
+      // of messages
+      pthread_mutex_lock(&server_lock);
+      send_all_clients(response, response_len);
+      pthread_mutex_unlock(&server_lock);
+    } else if (buf[0] == 0x01) {
+      char terminate_msg[2] = {0x01, '\n'};
+      pthread_mutex_lock(&server_lock);
+      terminated_count++;
+      if (terminated_count == expected_terms) {
+        send_all_clients(terminate_msg, sizeof(terminate_msg));
+        exit(EXIT_SUCCESS); // All clients are done, server auto terminates
       }
-    } else {
+      pthread_mutex_unlock(&server_lock);
     }
 
     // The next buffer starts from where the previous message ends in memory
     memmove(buf, buf + msg_len, current_buf_size - msg_len);
     current_buf_size -= msg_len;
   }
+
+  // The client left, need to remove it from the tracked list before freeing
+  pthread_mutex_lock(&server_lock);
+  for (size_t i = 0; i < client_count; i++) {
+    if (clients[i] == client) {
+      clients[i] = clients[client_count - 1]; // Whenever a client left, we fill the gap with the
+                                              // one who most recently joined
+      client_count--;
+    }
+  }
+  pthread_mutex_unlock(&server_lock);
 
   close(client->cfd);
   free(client);
@@ -85,7 +114,7 @@ int main(int argc, char *argv[]) {
   struct sockaddr_in server_addr;
   socklen_t client_addr_size;
   in_port_t server_port = atoi(argv[1]);
-  clients = malloc(sizeof(struct client_info) * client_count);
+  expected_terms = atoi(argv[2]);
 
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd == -1) {
@@ -122,9 +151,18 @@ int main(int argc, char *argv[]) {
     client->cfd = client_fd;
     client->addr = client_addr;
 
-    pthread_mutex_lock(&client_count_lock);
+    pthread_mutex_lock(&server_lock);
+    struct client_info **resized_clients =
+        realloc(clients, sizeof(struct client_info *) * (client_count + 1));
+    if (resized_clients == NULL) {
+      pthread_mutex_unlock(&server_lock);
+      close(client_fd);
+      free(client);
+      continue;
+    }
+    clients = resized_clients;
     clients[client_count++] = client;
-    pthread_mutex_unlock(&client_count_lock);
+    pthread_mutex_unlock(&server_lock);
 
     pthread_t thread;
     if (pthread_create(&thread, NULL, handle_client, client) != 0) {

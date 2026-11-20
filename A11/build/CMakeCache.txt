@@ -14,6 +14,15 @@
 # EXTERNAL cache entries
 ########################
 
+//Value Computed by CMake
+A11_BINARY_DIR:STATIC=/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4/build
+
+//Value Computed by CMake
+A11_IS_TOP_LEVEL:STATIC=ON
+
+//Value Computed by CMake
+A11_SOURCE_DIR:STATIC=/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4
+
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=/usr/bin/addr2line
 
@@ -123,7 +132,7 @@ CMAKE_PROJECT_DESCRIPTION:STATIC=Simple group chat
 CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_NAME:STATIC=groupChat
+CMAKE_PROJECT_NAME:STATIC=A11
 
 //Path to a program.
 CMAKE_RANLIB:FILEPATH=/usr/bin/ranlib

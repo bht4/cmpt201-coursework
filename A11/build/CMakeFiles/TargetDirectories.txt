@@ -1,0 +1,4 @@
+/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4/build/CMakeFiles/server.dir
+/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4/build/CMakeFiles/client.dir
+/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4/build/CMakeFiles/edit_cache.dir
+/home/cmpt201/units/04-long-assignments/a11-2026fall-d1-bht4/build/CMakeFiles/rebuild_cache.dir

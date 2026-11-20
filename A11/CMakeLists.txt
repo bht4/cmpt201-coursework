@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.28.3)
 project(
-  groupChat
+  A11
   DESCRIPTION "Simple group chat"
   LANGUAGES C)
 include_directories(include)
-add_executable(server server.c)
-add_executable(client client.c)
+add_executable(server src/server.c)
+add_executable(client src/client.c)
