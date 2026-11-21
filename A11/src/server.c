@@ -121,6 +121,12 @@ int main(int argc, char *argv[]) {
     handle_error("socket");
   }
 
+  // Enable SO_REUSEADDR to bypass TIME_WAIT
+  int opt = 1;
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    handle_error("setsockopt");
+  }
+
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
   server_addr.sin_port = htons(server_port);
